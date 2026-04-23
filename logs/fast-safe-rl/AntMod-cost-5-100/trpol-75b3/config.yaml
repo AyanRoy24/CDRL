@@ -1,0 +1,72 @@
+task: AntMod
+cost_start: 5
+cost_end: 100
+epoch_start: 100
+epoch_end: 900
+epoch: 1000
+max_traj_len: 1500
+collect_in_train: true
+rmin: 0
+rmax: 9999
+cmin: 0
+cmax: 300
+use_lagrangian: true
+device: cpu
+thread: 4
+seed: 10
+use_default_cfg: true
+lr: 0.0005
+hidden_sizes: !!python/tuple
+- 128
+- 128
+unbounded: false
+last_layer_scale: false
+target_kl: 0.001
+backtrack_coeff: 0.8
+max_backtracks: 10
+optim_critic_iters: 20
+gae_lambda: 0.95
+norm_adv: true
+lagrangian_pid: !!python/tuple
+- 0.05
+- 0.005
+- 0.1
+rescaling: true
+gamma: 0.99
+max_batchsize: 100000
+rew_norm: false
+deterministic_eval: false
+action_scaling: true
+action_bound_method: clip
+episode_per_collect: 10
+step_per_epoch: 10000
+repeat_per_collect: 4
+buffer_size: 100000
+worker: ShmemVectorEnv
+training_num: 20
+testing_num: 2
+batch_size: 99999
+reward_threshold: 10000
+save_interval: 4
+resume: false
+save_ckpt: true
+verbose: true
+render: false
+logdir: logs
+project: fast-safe-rl
+group: null
+name: trpol-75b3
+prefix: trpol
+suffix: ''
+goal_idx: 0
+max_episode_steps: 300
+gravity: -4.905
+param_dict:
+    fl hip lower limit:
+    - 0.01
+    fl hip upper limit:
+    - 0.01
+    fr hip lower limit:
+    - 0.01
+    fr hip upper limit:
+    - 0.01

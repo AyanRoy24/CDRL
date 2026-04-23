@@ -1,6 +1,6 @@
 # Data and miscs
 **/log/**
-**/logs/**
+#**/logs/**
 **/wandb/**
 **/misc/**
 
