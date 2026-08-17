@@ -1,0 +1,27 @@
+AdroitHandRelocateDense-v1, AdroitHandHammerDense-v1, AdroitHandDoorDense-v1 environment's reward functions were updated in v1.2.1 without an environment version update. Therefore, use gymnasium-robotics==1.2.0 for v1 reproducibility or use v2 in gymnasium-robotics>=1.4.3. See https://github.com/Farama-Foundation/Gymnasium-Robotics/pull/220 for more details
+AdroitHandRelocateDense-v1, AdroitHandHammerDense-v1, AdroitHandDoorDense-v1 environment's reward functions were updated in v1.2.1 without an environment version update. Therefore, use gymnasium-robotics==1.2.0 for v1 reproducibility or use v2 in gymnasium-robotics>=1.4.3. See https://github.com/Farama-Foundation/Gymnasium-Robotics/pull/220 for more details
+I0816 14:09:14.540002 23365598037056 xla_bridge.py:849] Unable to initialize backend 'tpu': INTERNAL: Failed to open libtpu.so: libtpu.so: cannot open shared object file: No such file or directory
+current working directory: /home2/ayanroy/CBF/FMBT/T1_upd
+Traceback (most recent call last):
+  File "/home2/ayanroy/CBF/FMBT/T1_upd/viz_map.py", line 240, in <module>
+    app.run(main)
+  File "/home2/ayanroy/miniconda3/envs/p311/lib/python3.11/site-packages/absl/app.py", line 410, in run
+    _run_main(main, args)
+  File "/home2/ayanroy/miniconda3/envs/p311/lib/python3.11/site-packages/absl/app.py", line 355, in _run_main
+    sys.exit(main(argv))
+             ^^^^^^^^^^
+  File "/home2/ayanroy/CBF/FMBT/T1_upd/viz_map.py", line 233, in main
+    env, diffusion_agent = load_diffusion_model(FLAGS.model_location)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home2/ayanroy/CBF/FMBT/T1_upd/viz_map.py", line 224, in load_diffusion_model
+    new_agent = agent.load(model_file)
+                ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home2/ayanroy/CBF/FMBT/T1_upd/cbf.py", line 450, in load
+    new_agent = flax.serialization.from_state_dict(target=self, state=pkl_file)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home2/ayanroy/miniconda3/envs/p311/lib/python3.11/site-packages/flax/serialization.py", line 93, in from_state_dict
+    return ty_from_state_dict(target, state)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home2/ayanroy/miniconda3/envs/p311/lib/python3.11/site-packages/flax/struct.py", line 161, in from_state_dict
+    raise ValueError(
+ValueError: Missing field actor in state dict while restoring an instance of CBF, at path .
