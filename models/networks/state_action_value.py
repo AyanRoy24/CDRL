@@ -1,0 +1,44 @@
+import flax.linen as nn
+import jax.numpy as jnp
+
+from models.networks import default_init
+
+
+class StateActionValue(nn.Module):
+    base_cls: nn.Module
+
+    @nn.compact
+    def __call__(
+        self,
+        observations: jnp.ndarray,
+        actions: jnp.ndarray,
+        budget: jnp.ndarray = None,
+        *args,
+        **kwargs
+    ) -> jnp.ndarray:
+        inputs = jnp.concatenate([observations, actions], axis=-1)
+        # Budget-conditioned critic: append the remaining cost budget (delta-bar),
+        # cf. CBF/bcrl budget-conditioned states.
+        if budget is not None:
+            inputs = jnp.concatenate([inputs, budget], axis=-1)
+        outputs = self.base_cls()(inputs, *args, **kwargs)
+
+        value = nn.Dense(1, kernel_init=default_init())(outputs)
+
+        return jnp.squeeze(value, -1)
+
+class Relu_StateActionValue(nn.Module):
+    base_cls: nn.Module
+
+    @nn.compact
+    def __call__(
+        self, observations: jnp.ndarray, actions: jnp.ndarray, *args, **kwargs
+    ) -> jnp.ndarray:
+        inputs = jnp.concatenate([observations, actions], axis=-1)
+        outputs = self.base_cls()(inputs, *args, **kwargs)
+
+        value = nn.Dense(1, kernel_init=default_init())(outputs)
+
+        value = nn.softplus(value)
+
+        return jnp.squeeze(value, -1)

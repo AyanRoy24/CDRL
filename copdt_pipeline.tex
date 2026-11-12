@@ -1,0 +1,175 @@
+% =====================================================================
+% copdt_pipeline.tex --- CoPDT/DSRL multi-task pipeline of multi_src/9_copdt:
+% shared latent space, CoPDT context encoder, budget-adaptive IQL.
+%
+% Fragment (no \documentclass): \input after preamble.tex, which provides
+% amsmath/amssymb, algorithm and algorithmic (NOT algpseudocode), so the
+% algorithm blocks use \STATE / \FOR / \ENDFOR / \REQUIRE.
+% All macros are \providecommand-guarded.
+% =====================================================================
+
+\providecommand{\Zsp}{\mathcal{Z}}
+\providecommand{\ind}{\mathbf{1}}
+\providecommand{\QC}{Q_C}
+\providecommand{\VC}{V_C}
+\providecommand{\bud}{\delta}
+\providecommand{\ctx}{\zeta}
+\providecommand{\epsd}{e_s}      % state encoder
+\providecommand{\epsa}{e_a}      % action encoder
+\providecommand{\decs}{d_s}      % state decoder
+\providecommand{\deca}{d_a}      % action decoder
+\providecommand{\penc}{p_e}      % context (prompt) encoder
+\providecommand{\Dtask}{\mathcal{D}_i}
+\providecommand{\Ctx}{\mathcal{X}}   % context set
+\providecommand{\Fam}{\mathcal{F}}   % task family
+
+\subsection{Multi-task pipeline with a CoPDT context encoder}
+\label{sec:copdt-pipeline}
+
+We train one budget-adaptive safe policy on the offline DSRL task suite
+$\{\Dtask\}_{i=1}^{N}$ ($N=26$ tasks in 13 families $\Fam$).  Tasks differ in
+state/action dimension, dynamics and constraint, and no task identifier is
+given to the policy.  The pipeline has three frozen-then-used stages, followed by
+a deployment loop in which the budget is tracked online.
+
+\paragraph{Stage~0: shared latent space.}
+For each family $f\in\Fam$ (the variants of a family are merged), we train an
+action auto-encoder $(\epsa^f,\deca^f)$ (skipped when the action dimension is
+already $2$) and then a state auto-encoder $(\epsd^f,\decs^f)$ with an
+inverse-dynamics head $g^f$ on the frozen action latents:
+\begin{align}
+  \mathcal{L}_a &= \E\big[\|\deca(\epsa(a)+\varepsilon)-a\|_2^2\big],
+  \qquad \varepsilon\sim\mathcal{N}(0,0.1^2),\\
+  \mathcal{L}_s &= \E\big[\|\decs(\epsd(s))-s\|_2^2\big]
+  + 0.1\,\E\big[\|g(\epsd(s),\epsd(s'))-\epsa(a)\|_2^2\big].
+\end{align}
+Both are then frozen.  Every task is mapped once into the common space
+$\Zsp_s\times\Zsp_a$ with $\Zsp_s=\sR^{32}$ and $\Zsp_a=\sR^{2}$, writing
+$\tilde s=\epsd(s)$ and $\tilde a=\epsa(a)$; rewards are rescaled per task so that
+an expert's per-step reward is about $1$.
+
+\paragraph{Stage~1: context encoder.}
+For task $i$, a context set $\Ctx_i=\{(\tilde s_j,\tilde a_j,\tilde s'_j,r_j,c_j)\}_{j=1}^{500}$
+is drawn i.i.d.\ from $\Dtask$ (redrawn until it holds a safe transition).  The
+safety-aware encoder $\penc$ maps it to $\ctx_i=\penc(\Ctx_i)\in\sR^{16}$, and a
+multi-head decoder must predict, from $(\ctx,\tilde s,\tilde a)$, the next latent
+state, the reward and the unsafe bit:
+\begin{equation}
+  \mathcal{L}_{\mathrm{ctx}}
+  = w_s\,\E\|f_s(\ctx,\tilde s,\tilde a)-\tilde s'\|^2
+  + w_r\,\E\|f_r(\ctx,\tilde s,\tilde a)-r\|^2
+  + w_c\,\E\,\mathrm{BCE}\big(f_c(\ctx,\tilde s,\tilde a),\ \ind[c>0]\big),
+  \label{eq:copdt-ctx}
+\end{equation}
+with $(w_s,w_r,w_c)=(1.0,\,0.0,\,2.0)$ and
+\begin{equation}
+  \mathrm{BCE}(p,y) = -\big[\,y\log p + (1-y)\log(1-p)\,\big]
+  \label{eq:bce}
+\end{equation}
+the binary cross-entropy of the unsafe bit.  There is no cost discriminator and no
+regime label: $\ctx$ is learned only through the predictive heads.  Only $\penc$
+is kept, and it is frozen.
+
+\paragraph{Stage~2: budget-adaptive policy.}
+We train one IQL-style agent on the pooled latent data
+$\bigcup_i\{(\tilde s,\tilde a,\tilde s',r,c)\}$, each transition conditioned on
+its own task's context $\ctx_i$ (a fresh $\Ctx_i$ per update) and on a budget
+$\bud$.  With $x=(\tilde s,\ctx)$:
+\begin{align}
+  \VC\text{-step:}\quad
+  & \VC(x)\leftarrow \arg\min \E\big[\mathcal{L}^{\,\tau_C}\big(\bar\QC(x,\tilde a)-\VC(x)\big)\big],
+  \notag\\
+  \QC\text{-step:}\quad
+  & y_C = c + \gamma_C\,m\,\VC(x'),\quad
+    \QC\leftarrow\arg\min\E\big[(\QC(x,\tilde a)-y_C)^2\big],
+  \notag\\
+  \text{budget sample:}\quad
+  & \hat\bud' = \max\!\Big(\VC(x'),\ \tfrac{\bar\QC(x,\tilde a)-c}{\gamma_C}\Big)^{+},\quad
+    \bud'\sim\mathcal{U}[\hat\bud',\,\bud_{\max}],\quad
+    \bud=c+\gamma_C\,\bud',
+  \notag\\
+  \text{reward critic:}\quad
+  & y_r=r+\gamma\,m\,V_r(x',\bud'),\quad
+    Q_r\leftarrow\arg\min\E\big[(Q_r(x,\tilde a,\bud)-y_r)^2\big],
+  \notag\\
+  \text{reward value:}\quad
+  & V_r(x,\bud)\leftarrow\arg\min\E\big[\mathcal{L}^{\,\tau}\big(\bar Q_r(x,\tilde a,\bud)-V_r(x,\bud)\big)\big],
+  \notag\\
+  \text{actor:}\quad
+  & \max_{\pi,\pi_{\mathrm{safe}}}\ \E\Big[
+    w_a\log\pi(\tilde a\mid x,\bud) + w_s\log\pi_{\mathrm{safe}}(\tilde a\mid x)\Big],
+  \label{eq:copdt-iql}
+\end{align}
+where $\mathcal{L}^{\tau}$ is the expectile loss, $m$ is the non-terminal mask,
+$w_a=\mathrm{clip}(e^{\beta(Q_r-V_r)},0,100)$ and
+$w_s=\mathrm{clip}(e^{\beta(\VC-\QC)},0,100)$.  The policy $\pi$ is conditioned
+on the budget and $\pi_{\mathrm{safe}}$ is a separate budget-independent safe actor.  One
+network therefore serves every budget.
+
+\paragraph{Deployment.}
+Given a target task and a budget $C\in\{10,20,40,80\}$, a context
+$\ctx=\penc(\Ctx)$ is computed once from offline data of the task (no burn-in).
+The running budget is initialised to $\hat\bud_0=C$.  At each step the agent
+plays the budget-conditioned action if $\hat\bud_t>\VC(\tilde s_t,\ctx)$ and the
+safe action otherwise, decodes it with $\deca$, and updates the budget by the
+learned recursion
+\begin{equation}
+  \hat\bud_{t+1} = g(\tilde s_t,\tilde a_t,\tilde s_{t+1},\hat\bud_t)
+  = \VC(\tilde s_{t+1},\ctx)+\frac{\hat\bud_t-\QC(\tilde s_t,\tilde a_t,\ctx)}{\gamma_C}.
+  \label{eq:copdt-budget}
+\end{equation}
+
+% ---------------------------------------------------------------------
+\begin{algorithm}[t]
+\caption{Training: latent space, context encoder and budget-adaptive policy}
+\label{alg:copdt-train}
+\begin{algorithmic}[1]
+\REQUIRE Offline datasets $\{\Dtask\}_{i=1}^{N}$ grouped by family $\Fam$; context size $K{=}500$; weights $(w_s,w_r,w_c)$; budget cap $\bud_{\max}$
+\STATE \textbf{Stage 0: latent space}
+\FOR{each family $f\in\Fam$}
+  \STATE Merge the datasets of $f$; train the action auto-encoder $(\epsa^f,\deca^f)$ on $a$ with noisy decoding
+  \STATE Train the state auto-encoder $(\epsd^f,\decs^f)$ with inverse-dynamics head $g^f$ on $(s,s',\epsa^f(a))$; keep the best held-out checkpoint
+\ENDFOR
+\STATE Freeze all encoders; set $\tilde s=\epsd(s)$, $\tilde a=\epsa(a)$ and rescale $r$ per task
+\STATE \textbf{Stage 1: context encoder}
+\WHILE{not converged}
+  \FOR{each task $i$}
+    \STATE Sample $\Ctx_i=\{(\tilde s,\tilde a,\tilde s',r,c)_j\}_{j=1}^{K}\sim\Dtask$ (resample until it has a safe transition)
+    \STATE $\ctx_i\leftarrow\penc(\Ctx_i)$
+    \STATE Sample a query batch from $\Dtask$ and predict $(\tilde s',r,\ind[c>0])$ with $f_s,f_r,f_c$ from $(\ctx_i,\tilde s,\tilde a)$
+  \ENDFOR
+  \STATE Update $\penc,f_s,f_r,f_c$ with $\mathcal{L}_{\mathrm{ctx}}$ of Eq.~\eqref{eq:copdt-ctx}
+\ENDWHILE
+\STATE Keep and freeze $\penc$
+\STATE \textbf{Stage 2: budget-adaptive policy}
+\WHILE{not converged}
+  \STATE Sample a pooled batch of latent transitions, spread evenly over the tasks
+  \STATE For each task $i$ draw a fresh $\Ctx_i$ and compute $\ctx_i=\penc(\Ctx_i)$; condition every transition on its own $\ctx_i$
+  \STATE Update $\VC$ (expectile) and $\QC$ with target $y_C=c+\gamma_C m\VC(x')$
+  \STATE Sample $\hat\bud'\sim\mathcal{U}[\max(\VC(x'),(\bar\QC-c)/\gamma_C)^+,\ \bud_{\max}]$ and set $\bud=c+\gamma_C\hat\bud'$
+  \STATE Update $Q_r(x,\tilde a,\bud)$ with $y_r=r+\gamma m V_r(x',\hat\bud')$; update $V_r$ (expectile)
+  \STATE Update $\pi(\cdot\mid x,\bud)$ and $\pi_{\mathrm{safe}}(\cdot\mid x)$ by weighted regression, Eq.~\eqref{eq:copdt-iql}
+\ENDWHILE
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{Deployment: budget-tracked safe control in a target task}
+\label{alg:copdt-test}
+\begin{algorithmic}[1]
+\REQUIRE Target task $i$ with offline data $\Dtask$; budget $C$; frozen $\penc$, $\epsd$, $\epsa$, $\deca$; trained $\pi$, $\pi_{\mathrm{safe}}$, $\QC$, $\VC$
+\STATE Sample $\Ctx_i\sim\Dtask$ and compute $\ctx\leftarrow\penc(\Ctx_i)$ \hfill (no burn-in)
+\STATE Initialise the budget $\hat\bud_0\leftarrow C$; observe $s_0$
+\FOR{$t=0,\dots,T-1$}
+  \STATE $\tilde s_t\leftarrow\epsd(s_t)$
+  \IF{$\hat\bud_t>\VC(\tilde s_t,\ctx)$}
+    \STATE Sample $\tilde a_t\sim\pi(\cdot\mid\tilde s_t,\ctx,\hat\bud_t)$ \hfill (reward-seeking)
+  \ELSE
+    \STATE Sample $\tilde a_t\sim\pi_{\mathrm{safe}}(\cdot\mid\tilde s_t,\ctx)$ \hfill (safe fallback)
+  \ENDIF
+  \STATE Execute $a_t=\deca(\tilde a_t)$; observe $s_{t+1}$, $r_t$, $c_t$; set $\tilde s_{t+1}=\epsd(s_{t+1})$
+  \STATE $\hat\bud_{t+1}\leftarrow\VC(\tilde s_{t+1},\ctx)+\big(\hat\bud_t-\QC(\tilde s_t,\tilde a_t,\ctx)\big)/\gamma_C$ \hfill Eq.~\eqref{eq:copdt-budget}
+\ENDFOR
+\STATE Report episode return $\sum_t r_t$ and cost $\sum_t c_t$ (normalised against the DSRL reference at budget $C$)
+\end{algorithmic}
+\end{algorithm}
